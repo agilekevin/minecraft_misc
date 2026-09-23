@@ -100,7 +100,7 @@ client can do. Place a temporary block behind the water fan's diagonal steps.
 | `builds/cascade_*.py` | control circuit and sub-assemblies |
 | `mcschem.py` | litemapy helpers: `block()`, `sign()`, `save()` |
 | `bamboo_sizing.py` | yield and footprint arithmetic |
-| `schematics/bamboo-cascade-4x16-cobble.litematic` | the small one, 64 plants — hand-tuned past the script (see below) |
+| `schematics/bamboo-cascade-4x16-cobble.litematic` | the small one, 64 plants — hand-tuned past the script (see “The two shipped schematics”) |
 | `schematics/bamboo-cascade-8x32-cobble.litematic` | the medium, 256 plants — straight from `bamboo_cascade.py` |
 
 The RCON harness that measured these numbers on a local test server is not

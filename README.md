@@ -60,6 +60,25 @@ Things that were expensive to learn, and are baked into the script:
 - **One hopper per ~118 plants**, each with its own sump, instead of a hopper
   row. It matters where hoppers are chunk-limited.
 
+### The two shipped schematics
+
+`bamboo-cascade-8x32-cobble.litematic` is exactly what `builds/bamboo_cascade.py
+--rows 8 --cols 4` writes, with cobblestone as the fill.
+
+`bamboo-cascade-4x16-cobble.litematic` has been **edited past what the script
+produces**, for building by hand on a server:
+
+- both controls at ground level — a lever for the knives, a second redstone
+  torch ladder bringing the water lever's signal 31 blocks up — with signs
+- the enclosing shell above the header, the back wall and a vestigial corner
+  column removed (687 blocks, about 11 stacks of cobble)
+- lowered so the collection chests sit on the bottom row
+- cobblestone blade ends instead of orange wool
+
+1,542 blocks: 1,050 cobblestone, 136 white glazed terracotta, 48 honey, 102
+redstone dust, 48 torches, 10 repeaters, 8 sticky pistons. Regenerating it from
+the script will **not** reproduce these edits.
+
 ## Building it in survival
 
 The 4×16 in `schematics/bamboo-cascade-4x16-cobble.litematic` is trimmed for
@@ -81,7 +100,8 @@ client can do. Place a temporary block behind the water fan's diagonal steps.
 | `builds/cascade_*.py` | control circuit and sub-assemblies |
 | `mcschem.py` | litemapy helpers: `block()`, `sign()`, `save()` |
 | `bamboo_sizing.py` | yield and footprint arithmetic |
-| `schematics/` | generated `.litematic` files |
+| `schematics/bamboo-cascade-4x16-cobble.litematic` | the small one, 64 plants — hand-tuned past the script (see below) |
+| `schematics/bamboo-cascade-8x32-cobble.litematic` | the medium, 256 plants — straight from `bamboo_cascade.py` |
 
 The RCON harness that measured these numbers on a local test server is not
 published; a few scripts here import from an `experiments/` directory that is

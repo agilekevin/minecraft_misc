@@ -79,6 +79,43 @@ produces**, for building by hand on a server:
 redstone dust, 48 torches, 10 repeaters, 8 sticky pistons. Regenerating it from
 the script will **not** reproduce these edits.
 
+## Slice mode: tiling a wide farm
+
+A 128-wide farm is not one schematic. The design's period along X is 8 columns,
+so `build_parts()` cuts a finished build into a repeating **module** and the
+one-off end pieces, and you tile the module with Litematica's grid placement:
+
+```bash
+./venv/bin/python builds/bamboo_cascade.py --rows 8 --cols 16 --parts
+```
+
+| Piece | Tiles? | Why |
+|---|---|---|
+| `module` | **every 8 blocks in X** | blades, soil, riser seals, pistons, firing bus, south wall |
+| `fan` | no | its height is half the width, so it is built once |
+| `collection` | no | `plan_stream` *searches* for sump spacing; it is not periodic |
+| `west` | no | the torch tower and the controls |
+| `east` | no | the east wall |
+
+Every piece comes back in the same coordinate frame, so they share one origin;
+only the module repeats.
+
+The cut is by **provenance, not geometry**: the builder tags each cell with the
+stage that wrote it, so nothing is duplicated or kept in step by hand.
+`verify_parts()` reassembles the pieces and diffs them against the monolith —
+exact at 4x16, 6x24, 8x32 and 12x48, and `build_parts()` refuses outright if any
+segment differs from the one it is about to ship.
+
+The module carries one bus repeater per line at a fixed column, because the
+monolith spaces them every 14 blocks, which never lines up with 8. That costs one
+redstone tick per module, so the far end of a 16-module farm fires ~0.8 s after
+the near end. The knives close before the water starts, so it does not matter.
+
+**Tiling whole units is the cheaper option if you do not need one set of
+controls.** Four 8x32 units cost 25.9 blocks per plant against 25.8 for one
+128-wide farm — the fan, tower and collection are tiny next to the bulk — and
+each unit is self-contained and independently measured.
+
 ## Building it in survival
 
 The 4×16 in `schematics/bamboo-cascade-4x16-cobble.litematic` is trimmed for

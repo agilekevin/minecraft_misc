@@ -159,9 +159,40 @@ def layout(rows, cols, bx=3):
                 fan_h=fan_h, fan_x=fan_x, top_y=top_y)
 
 
+
+class _Tagged:
+    """A Region that remembers which build stage first wrote each cell.
+
+    `build_parts()` uses it to cut a finished build into the repeating 8-wide
+    module and the one-off end pieces, so nothing here has to be duplicated or
+    kept in step by hand. Air is not tagged: the build starts by filling every
+    cell with air, which would otherwise claim the whole region.
+    """
+
+    def __init__(self, reg):
+        self.reg, self.stage, self.tags = reg, None, {}
+
+    def __setitem__(self, key, value):
+        if getattr(value, "id", "") != "minecraft:air":
+            self.tags.setdefault(tuple(key), self.stage)
+        self.reg[key] = value
+
+    def __getitem__(self, key):
+        return self.reg[key]
+
+    def __getattr__(self, name):
+        return getattr(self.reg, name)
+
+
+def _stage(reg, name):
+    """Name the section about to run, for _Tagged. A no-op on a plain Region."""
+    if isinstance(reg, _Tagged):
+        reg.stage = name
+
+
 def build_region(rows=6, cols=3, add_sign=True,
                  hard="white_glazed_terracotta", fill="stone", lean=True, disp_every=3,
-                 fan=True, stream=True, bx=3):
+                 fan=True, stream=True, bx=3, tagged=False):
     """`hard` is the block honey cannot drag; `fill` is everything else.
 
     `fill` must be a FULL SOLID block that does not fall -- stone,
@@ -189,6 +220,8 @@ def build_region(rows=6, cols=3, add_sign=True,
     bx, width = m["bx"], m["width"]
     lane_z, floor_y = m["lane_z"], m["floor_y"]
     reg = region(W, H, D)
+    if tagged:
+        reg = _Tagged(reg)
 
     stone = block(fill)
     obs = block(hard)
@@ -215,6 +248,7 @@ def build_region(rows=6, cols=3, add_sign=True,
     top_lane = rows + 1                     # lanes 0..rows-1 crop, rows header,
     #                                          rows+1 dispensers and machinery
 
+    _stage(reg, "lanes")
     # ---- the lanes ---------------------------------------------------------
     for L in range(top_lane + 1):
         z, fy = lane_z(L), floor_y(L)
@@ -286,6 +320,7 @@ def build_region(rows=6, cols=3, add_sign=True,
                     if bx <= px + dx < bx + width:
                         reg[px + dx, fy - 6, z] = AIR
 
+    _stage(reg, "repeaters")
     # ---- repeaters on every bus line ---------------------------------------
     # Dust carries 15 blocks. Without these the segments past the first 15
     # simply never fire, and the schematic looks perfectly continuous.
@@ -302,6 +337,7 @@ def build_region(rows=6, cols=3, add_sign=True,
             else:
                 x += 1
 
+    _stage(reg, "collection")
     # ---- collection ---------------------------------------------------------
     hz, fz, fy0 = m["hopper_z"], m["feed_z"], floor_y(0)
     if stream:
@@ -376,6 +412,7 @@ def build_region(rows=6, cols=3, add_sign=True,
         for y in range(0, floor_y(rows) + HEADROOM):
             reg[x, y, m["wall_z"]] = stone
 
+    _stage(reg, "walls")
     # ---- side walls --------------------------------------------------------
     for z in range(0, D):
         for y in range(0, m["top_y"] + 1):
@@ -383,6 +420,7 @@ def build_region(rows=6, cols=3, add_sign=True,
                 if reg[x, y, z].id == "minecraft:air":
                     reg[x, y, z] = stone
 
+    _stage(reg, "fan")
     # ---- the fan: one dispenser, spread by a stepped pyramid ---------------
     dz, dfy = lane_z(top_lane), floor_y(rows)
     hz = lane_z(rows)
@@ -421,6 +459,7 @@ def build_region(rows=6, cols=3, add_sign=True,
             reg[rx, dfy + fan_h + 2, dz] = rep_e
         x += 14
 
+    _stage(reg, "tower")
     # ---- one lever for every knife: a redstone torch tower -----------------
     # Each torch inverts, so a tap is only in phase with the lever an EVEN
     # number of torches up. The bus lines are DROP apart and DROP is even, so
@@ -493,6 +532,7 @@ def build_region(rows=6, cols=3, add_sign=True,
             if reg[x, y, D - 1].id == "minecraft:air":
                 reg[x, y, D - 1] = stone
 
+    _stage(reg, "demote")
     # ---- demote every immovable block honey cannot reach ------------------
     # Honey drags face-adjacent MOVABLE blocks, so a block only has to resist
     # that if it touches a honey blade in one of the two states a blade is ever
@@ -521,6 +561,7 @@ def build_region(rows=6, cols=3, add_sign=True,
                 if reg[x, y, z].id == hard_id and (x, y, z) not in must_hold:
                     reg[x, y, z] = stone
 
+    _stage(reg, "strip")
     # ---- strip the fill ----------------------------------------------------
     # A block with six solid neighbours holds no water, supports no dust and
     # cannot be reached by honey, so it is doing nothing but hiding the design.
@@ -550,6 +591,7 @@ def build_region(rows=6, cols=3, add_sign=True,
         for c in doomed:
             reg[c] = AIR
 
+    _stage(reg, "sign")
     if add_sign:
         reg[0, m["base"] - 1, 1] = stone
         # rotation=8 faces NORTH -- the open side. The default, 0, faces south
@@ -560,6 +602,144 @@ def build_region(rows=6, cols=3, add_sign=True,
     return reg, m
 
 
+# ---------------------------------------------------------------------------
+# Slice mode: one repeating 8-wide module, plus the one-off end pieces.
+#
+# The farm's period along X is SEG, so blades, soil, riser seals, pistons and
+# the firing bus repeat every 8 columns. Three things do not, and are cut out
+# as separate pieces: the water fan (its height is half the width, so it is
+# built once), the collection trough (plan_stream SEARCHES for sump positions,
+# so it is not periodic) and the torch tower with the controls.
+#
+# Bus repeaters are the one thing the module has to re-place: the monolith puts
+# them every 14 blocks, which never lines up with 8. One per module per bus line
+# is well inside dust's 15-block reach. It costs one redstone tick per module,
+# so the far end of a 16-module farm fires about 0.8 s after the near end --
+# harmless, because the knives close before the water starts.
+MODULE_STAGES = ("lanes", "repeaters")
+REPEATER_DX = 4          # not 1: that column is the piston's
+
+
+def build_parts(rows=8, cols=4, module_segment=0, **kw):
+    """Cut a finished build into {module, fan, collection, west, east}.
+
+    Every piece is returned in the SAME coordinate frame as the monolith, so
+    they drop on top of each other at one origin; the module is SEG wide and
+    tiles every SEG blocks along X. Returns (parts, m).
+    """
+    kw.setdefault("fill", "cobblestone")
+    reg, m = build_region(rows=rows, cols=cols, tagged=True, **kw)
+    W, H, D, bx, width = m["W"], m["H"], m["D"], m["bx"], m["width"]
+    tags = reg.tags
+
+    def cells():
+        for (x, y, z), stage in tags.items():
+            b = reg[x, y, z]
+            if b.id != "minecraft:air":
+                yield (x, y, z), stage, b
+
+    # Find the bus lines by what is actually in the build, not by tag: the
+    # repeaters section OVERWRITES dust the lanes section laid, and a cell keeps
+    # the tag of whoever wrote it first.
+    bus_lines = {(y, z) for (x, y, z), stage, b in cells()
+                 if b.id == "minecraft:repeater" and bx <= x < bx + width}
+
+    def in_module(x, y, z, stage):
+        """Does this cell repeat every SEG columns?
+
+        The lanes and the bus do. So does the south wall, which the tower
+        section fills across the whole width -- it is uniform in x, so it tiles;
+        only its two end columns belong to the end pieces.
+        """
+        if not (bx <= x < bx + width):
+            return False
+        return stage in MODULE_STAGES or (stage == "tower" and z == D - 1)
+
+    module = region(SEG, H, D)
+    x0 = bx + module_segment * SEG
+    for (x, y, z), stage, b in cells():
+        if in_module(x, y, z, stage) and x0 <= x < x0 + SEG:
+            module[x - x0, y, z] = AIR if (y, z) in bus_lines and b.id == "minecraft:repeater" else b
+    for (y, z) in bus_lines:                     # one repeater per bus line, same spot every module
+        if module[REPEATER_DX, y, z].id == "minecraft:redstone_wire":
+            module[REPEATER_DX, y, z] = block("repeater", facing="west", delay="1",
+                                              locked="false", powered="false")
+
+    shapes = {}
+    for k in range(width // SEG):
+        xk = bx + k * SEG
+        # a bus line reads the same whether this column carries its dust or its
+        # repeater, and the repeaters are re-placed below, so normalise them
+        shapes[k] = {(x - xk, y, z): ("bus" if (y, z) in bus_lines and b.id in
+                                      ("minecraft:repeater", "minecraft:redstone_wire") else str(b))
+                     for (x, y, z), stage, b in cells()
+                     if in_module(x, y, z, stage) and xk <= x < xk + SEG}
+    odd = [k for k, sh in shapes.items() if sh != shapes[module_segment]]
+    if odd:
+        raise ValueError(f"segments {odd} differ from segment {module_segment}: the build does "
+                         f"not tile every {SEG} blocks, so a module cannot represent it")
+
+    parts = {"module": module}
+    for name, stages, keep in (("fan", ("fan",), None),
+                               ("collection", ("collection",), None),
+                               ("west", ("tower", "sign", "walls"), lambda x: x < bx),
+                               ("east", ("walls", "tower"), lambda x: x >= bx + width)):
+        piece = region(W, H, D)
+        for (x, y, z), stage, b in cells():
+            if stage in stages and (keep is None or keep(x)):
+                piece[x, y, z] = b
+        parts[name] = piece
+    return parts, m
+
+
+def verify_parts(rows=8, cols=4, **kw):
+    """Reassemble the pieces and diff against the monolith they came from.
+
+    Only the bus repeaters may differ, and only in WHERE they sit on a bus line.
+    Returns (ok, report).
+    """
+    kw.setdefault("fill", "cobblestone")
+    parts, m = build_parts(rows=rows, cols=cols, **kw)
+    whole, _ = build_region(rows=rows, cols=cols, **kw)
+    W, H, D, bx, width = m["W"], m["H"], m["D"], m["bx"], m["width"]
+
+    rebuilt = region(W, H, D)
+    for x in range(W):
+        for y in range(H):
+            for z in range(D):
+                rebuilt[x, y, z] = AIR
+    for name in ("fan", "collection", "west", "east"):
+        piece = parts[name]
+        for x in range(W):
+            for y in range(H):
+                for z in range(D):
+                    b = piece[x, y, z]
+                    if b.id != "minecraft:air":
+                        rebuilt[x, y, z] = b
+    for k in range(width // SEG):
+        for dx in range(SEG):
+            for y in range(H):
+                for z in range(D):
+                    b = parts["module"][dx, y, z]
+                    if b.id != "minecraft:air":
+                        rebuilt[bx + k * SEG + dx, y, z] = b
+
+    only_repeaters, other = 0, []
+    for x in range(W):
+        for y in range(H):
+            for z in range(D):
+                a, b = whole[x, y, z], rebuilt[x, y, z]
+                if a.id == b.id and str(a) == str(b):
+                    continue
+                ids = {a.id.split(":")[-1], b.id.split(":")[-1]}
+                if ids <= {"repeater", "redstone_wire"}:
+                    only_repeaters += 1
+                else:
+                    other.append((x, y, z, a.id, b.id))
+    ok = not other
+    return ok, {"repeater_moves": only_repeaters, "other": other[:20], "other_count": len(other)}
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -567,7 +747,22 @@ if __name__ == "__main__":
     ap.add_argument("--rows", type=int, default=6)
     ap.add_argument("--cols", type=int, default=3)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--parts", action="store_true",
+                    help="write the tileable module and the end pieces instead of one build")
     a = ap.parse_args()
+    if a.parts:
+        ok, report = verify_parts(rows=a.rows, cols=a.cols)
+        print("pieces reassemble into the monolith:", ok,
+              f"({report['repeater_moves']} repeaters moved along their bus line)")
+        if not ok:
+            raise SystemExit(f"pieces do NOT reassemble: {report['other_count']} cells differ, "
+                             f"first few {report['other']}")
+        parts, m = build_parts(rows=a.rows, cols=a.cols)
+        for name, piece in parts.items():
+            fn = f"cascade-{name}-{a.rows}rows" + ("" if name == "module" else f"-{a.cols * SEG}wide")
+            save(piece, fn, f"Bamboo Cascade {name}",
+                 f"{a.rows} rows; module tiles every {SEG} blocks along X")
+        raise SystemExit(0)
     reg, m = build_region(rows=a.rows, cols=a.cols)
     name = a.out or f"bamboo-cascade-{a.rows}x{a.cols * SEG}"
     save(reg, name, "Bamboo Cascade",

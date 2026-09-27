@@ -68,16 +68,38 @@ Things that were expensive to learn, and are baked into the script:
 `bamboo-cascade-4x16-cobble.litematic` has been **edited past what the script
 produces**, for building by hand on a server:
 
-- both controls at ground level — a lever for the knives, a second redstone
-  torch ladder bringing the water lever's signal 31 blocks up — with signs
+- both controls at ground level, with signs: a lever for the knives at the
+  front, and a lever for the water at the foot of its own torch ladder, which
+  climbs 30 torches behind the dispenser
 - the enclosing shell above the header, the back wall and a vestigial corner
   column removed (687 blocks, about 11 stacks of cobble)
 - lowered so the collection chests sit on the bottom row
 - cobblestone blade ends instead of orange wool
+- **the 64 blocks under the parked blades removed** — see below
 
-1,542 blocks: 1,050 cobblestone, 136 white glazed terracotta, 48 honey, 102
-redstone dust, 48 torches, 10 repeaters, 8 sticky pistons. Regenerating it from
-the script will **not** reproduce these edits.
+1,432 blocks: 1,011 cobblestone, 88 white glazed terracotta, 48 honey, 81
+redstone dust, 48 torches, 8 repeaters, 8 sticky pistons, 2 levers.
+Regenerating it from the script will **not** reproduce these edits.
+
+### Two things the rig settled (2026-09-26)
+
+Both were "obviously fine" by inspection, and one of them was not.
+
+**The block under each parked blade does nothing — delete it.** The builder
+promotes it to the immovable material because honey touches it, but air cannot
+be dragged either, and with the knives extended the park cavity is sealed by the
+lid above and the blade in front, so no water reaches it. Measured on a 4x16,
+same build and same sequence: floors in **543/576 banked (94.3%)**, floors out
+**549/576 (95.3%)**, knives 64/64 and every tread wet both times. That is 48 of
+the 136 glazed terracotta — a third of the clay chain — for no measurable loss.
+Take the FULL blade width: the outermost end column each side is easy to miss.
+
+**A button will not drive the water dispenser; use a lever.** A 15-tick press
+(oak button) fired it in 1 of 5 attempts, a 10-tick press never, a held lever 5
+of 5. The ladder is *not* the cause — probing the top dust showed the pulse
+arriving intact at power 15 and about 0.74 s wide. It is the dispenser's edge
+trigger sitting on the threshold. One-press operation needs a monostable at the
+TOP, fed by a lever's steady signal.
 
 ## Slice mode: tiling a wide farm
 

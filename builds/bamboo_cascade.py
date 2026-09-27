@@ -354,8 +354,27 @@ def build_region(rows=6, cols=3, add_sign=True,
         # A feed's last column is level 7, six along from the one it faces, so
         # each sump starts there and the water falls in instead of stopping
         # short. The spacing is searched, not computed: see plan_stream.
+        if stream == "uniform":
+            # One feed and one hopper per MODULE, so the collection tiles with
+            # everything else and no search is needed. plan_stream exists
+            # because evenly spaced feeds do not survive integer rounding -- a
+            # period of exactly SEG does, by construction.
+            #
+            # The searched layout straddles TWO columns because an odd gap puts
+            # the meeting point between columns; an even period of 8 makes the
+            # opposing flows cancel on ONE column, 4 from each feed, so this
+            # uses a single-column sump.
+            # UNTESTED IN WORLD: the two-column figures (371 and 320 items) were
+            # measured on the odd-gap geometry.
+            feeds = [bx + k * SEG for k in range(width // SEG)]
+            hops = [f + SEG // 2 for f in feeds]
+            spans = [(c, c) for c in hops]
+            nhop = len(hops)
+            single_column_sump = True
+        else:
+            single_column_sump = False
         # capacity sets the floor; geometry may need more zones than that
-        for n in range(nhop, nhop + 6):
+        for n in range(nhop, nhop + 6) if stream != "uniform" else ():
             try:
                 feeds, spans, hops = plan_stream(bx, width, n)
                 nhop = n
@@ -363,8 +382,9 @@ def build_region(rows=6, cols=3, add_sign=True,
             except ValueError:
                 continue
         else:
-            raise ValueError(
-                f"cannot plumb a {width}-wide trough at any hopper count")
+            if stream != "uniform":
+                raise ValueError(
+                    f"cannot plumb a {width}-wide trough at any hopper count")
         sumps = {x for lo, hi in spans for x in range(lo, hi + 1)}
 
         # No pit. The crop settles ON the sump floor, at the two centre
@@ -372,7 +392,7 @@ def build_region(rows=6, cols=3, add_sign=True,
         # items against 5 and 2 on the columns either side. A pit one block
         # deeper put the hopper below all of it and collected nothing.
         pit = sump
-        pits = {x for c in hops for x in (c, c + 1)}
+        pits = set(hops) if single_column_sump else {x for c in hops for x in (c, c + 1)}
         for x in range(bx, bx + width):
             b = sump if x in sumps else bed
             for y in range(0, b + 1):
@@ -632,16 +652,15 @@ def build_parts(rows=8, cols=4, module_segment=0, **kw):
     W, H, D, bx, width = m["W"], m["H"], m["D"], m["bx"], m["width"]
     tags = reg.tags
 
-    def cells():
-        for (x, y, z), stage in tags.items():
-            b = reg[x, y, z]
-            if b.id != "minecraft:air":
-                yield (x, y, z), stage, b
+    # Walk the tagged cells ONCE. Re-walking them per segment and per piece
+    # made a 128-wide cut take longer than a quarter of an hour.
+    cells = [((x, y, z), stage, reg[x, y, z]) for (x, y, z), stage in tags.items()
+             if reg[x, y, z].id != "minecraft:air"]
 
     # Find the bus lines by what is actually in the build, not by tag: the
     # repeaters section OVERWRITES dust the lanes section laid, and a cell keeps
     # the tag of whoever wrote it first.
-    bus_lines = {(y, z) for (x, y, z), stage, b in cells()
+    bus_lines = {(y, z) for (x, y, z), stage, b in cells
                  if b.id == "minecraft:repeater" and bx <= x < bx + width}
 
     def in_module(x, y, z, stage):
@@ -655,9 +674,24 @@ def build_parts(rows=8, cols=4, module_segment=0, **kw):
             return False
         return stage in MODULE_STAGES or (stage == "tower" and z == D - 1)
 
+    # bucket the module-shaped cells by segment in one pass, and check they match
+    shapes = {k: {} for k in range(width // SEG)}
+    for (x, y, z), stage, b in cells:
+        if not in_module(x, y, z, stage):
+            continue
+        k, dx = divmod(x - bx, SEG)
+        # a bus line reads the same whether this column carries its dust or its
+        # repeater, and the repeaters are re-placed below, so normalise them
+        shapes[k][(dx, y, z)] = ("bus" if (y, z) in bus_lines and b.id in
+                                 ("minecraft:repeater", "minecraft:redstone_wire") else str(b))
+    odd = [k for k, sh in shapes.items() if sh != shapes[module_segment]]
+    if odd:
+        raise ValueError(f"segments {odd} differ from segment {module_segment}: the build does "
+                         f"not tile every {SEG} blocks, so a module cannot represent it")
+
     module = region(SEG, H, D)
     x0 = bx + module_segment * SEG
-    for (x, y, z), stage, b in cells():
+    for (x, y, z), stage, b in cells:
         if in_module(x, y, z, stage) and x0 <= x < x0 + SEG:
             module[x - x0, y, z] = AIR if (y, z) in bus_lines and b.id == "minecraft:repeater" else b
     for (y, z) in bus_lines:                     # one repeater per bus line, same spot every module
@@ -665,27 +699,13 @@ def build_parts(rows=8, cols=4, module_segment=0, **kw):
             module[REPEATER_DX, y, z] = block("repeater", facing="west", delay="1",
                                               locked="false", powered="false")
 
-    shapes = {}
-    for k in range(width // SEG):
-        xk = bx + k * SEG
-        # a bus line reads the same whether this column carries its dust or its
-        # repeater, and the repeaters are re-placed below, so normalise them
-        shapes[k] = {(x - xk, y, z): ("bus" if (y, z) in bus_lines and b.id in
-                                      ("minecraft:repeater", "minecraft:redstone_wire") else str(b))
-                     for (x, y, z), stage, b in cells()
-                     if in_module(x, y, z, stage) and xk <= x < xk + SEG}
-    odd = [k for k, sh in shapes.items() if sh != shapes[module_segment]]
-    if odd:
-        raise ValueError(f"segments {odd} differ from segment {module_segment}: the build does "
-                         f"not tile every {SEG} blocks, so a module cannot represent it")
-
     parts = {"module": module}
     for name, stages, keep in (("fan", ("fan",), None),
                                ("collection", ("collection",), None),
                                ("west", ("tower", "sign", "walls"), lambda x: x < bx),
                                ("east", ("walls", "tower"), lambda x: x >= bx + width)):
         piece = region(W, H, D)
-        for (x, y, z), stage, b in cells():
+        for (x, y, z), stage, b in cells:
             if stage in stages and (keep is None or keep(x)):
                 piece[x, y, z] = b
         parts[name] = piece

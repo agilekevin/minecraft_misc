@@ -133,6 +133,23 @@ monolith spaces them every 14 blocks, which never lines up with 8. That costs on
 redstone tick per module, so the far end of a 16-module farm fires ~0.8 s after
 the near end. The knives close before the water starts, so it does not matter.
 
+### `stream="uniform"` — untested
+
+`plan_stream` searches `itertools.combinations` of the interior columns for feed
+positions, which is C(116, 8) ≈ 10^12 at 128 wide: not slow, infeasible. Every
+attempt at a 128-wide build died there, not in the cut.
+
+`build_region(..., stream="uniform")` skips the search: one feed at each
+module's left edge and one hopper at its centre, 4 columns from each feed. The
+search exists because evenly spaced feeds do not survive integer rounding, and a
+period of exactly 8 does, by construction — so this also makes the collection
+tile with everything else. A 128-wide build then takes about 2 seconds.
+
+It uses a **single-column sump**, because an even period makes the opposing
+flows cancel on one column rather than between two. That is reasoning from the
+measured rules, **not a measurement** — the 371-and-320-item figures came from
+the odd-gap geometry. Test it on a rig before committing a farm to it.
+
 **Tiling whole units is the cheaper option if you do not need one set of
 controls.** Four 8x32 units cost 25.9 blocks per plant against 25.8 for one
 128-wide farm — the fan, tower and collection are tiny next to the bulk — and
